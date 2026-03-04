@@ -1,7 +1,7 @@
 ---
 title: "CTA-ED Exercise 2: dictionary-based methods"
-author: "Yan Ge"
-date: "24/2/2026"
+author: "Siyu"
+date: "2/24/2026"
 output: html_document
 ---
 
@@ -63,14 +63,11 @@ tweets <-
     users = newspapers,
     start_tweets = "2020-01-01T00:00:00Z",
     end_tweets = "2020-05-01T00:00:00Z",
-    data_path = "data/sentanalysis/",
+    data_path = "Users/aitingrnb/Downloads/",
     n = Inf,
   )
 
-tweets <- 
-  bind_tweets(data_path = "data/sentanalysis/", output_format = "tidy")
-
-saveRDS(tweets, "data/sentanalysis/newstweets.rds")
+tweets  <- readRDS(gzcon(url(")))
 ```
 
 
@@ -78,8 +75,9 @@ saveRDS(tweets, "data/sentanalysis/newstweets.rds")
 
 You can download the tweets data directly from the source in the following way: the data was collected by Chris Barrie and is stored on his Github page.
 
-```{r, eval = F}
-tweets  <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/sentanalysis/newstweets.rds?raw=true")))
+```{r}
+tweets <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/sentanalysis/newstweets.rds?raw=true")))
+tweets$date <- as.Date(tweets$created_at)
 ```
 
 
@@ -87,6 +85,10 @@ tweets  <- readRDS(gzcon(url("https://github.com/cjbarrie/CTA-ED/blob/main/data/
 
 Let's have a look at the data:
 
+```{r}
+head(tweets)
+colnames(tweets)
+```
 
 Each row here is a tweets produced by one of the news outlets detailed above over a five month period, January--May 2020. Note also that each tweets has a particular date. We can therefore use these to look at any over time changes.
 
@@ -130,6 +132,7 @@ tidy_tweets <- tidy_tweets %>%
 ## Get sentiment dictionaries
 
 Several sentiment dictionaries come bundled with the <tt>tidytext</tt> package. These are:
+
 * `AFINN` from [Finn Årup Nielsen](http://www2.imm.dtu.dk/pubdb/views/publication_details.php?id=6010),
 * `bing` from [Bing Liu and collaborators](https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html), and
 * `nrc` from [Saif Mohammad and Peter Turney](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm)
@@ -327,8 +330,7 @@ We then take the `data_dictionary_LSD2015` that comes bundled with `quanteda` an
 ```{r}
 # select only the "negative" and "positive" categories
 data_dictionary_LSD2015_pos_neg <- data_dictionary_LSD2015[1:2]
-toks_news_small <- toks_news[1:5000]#computer burnout
-toks_news_lsd <- tokens_lookup(toks_news_small, dictionary = data_dictionary_LSD2015_pos_neg)
+toks_news_lsd <- tokens_lookup(toks_news, dictionary = data_dictionary_LSD2015_pos_neg)
 ```
 
 This creates a long list of all the texts (tweets) annotated with a series of 'positive' or 'negative' annotations depending on the valence of the words in that text. The creators of `quanteda` then recommend we generate a document feature matric from this. Grouping by date, we then get a dfm object, which is a quite convoluted list object that we can plot using base graphics functions for plotting matrices.
@@ -480,26 +482,35 @@ trans_dict <- dictionary(list(trans = c('trans', 'transgender', 'trans rights', 
                               terf = c('transphobic', 'terf', 'terfs', 'transphobia', 'transphobes', 'gender critical')))
 
 # back to tokens object
-tidy_dfm_trans <- toks_news %>%
+dfm_dict_trans <- toks_news %>%
   tokens_lookup(dictionary = trans_dict) %>% # look up the occurrence of my dictionaries
   dfm() %>% # turn into dfm
   dfm_group(groups = username) %>% # group by newspaper
   convert(to = "data.frame") %>% # convert it to a dataframe
   rename("newspaper" = doc_id) %>% # rename variable 
-  mutate(sentiment=trans - terf) %>%
-  full_join(totals_newspaper, by="newspaper")
+  full_join(totals_newspaper, word, by="newspaper")
   
 # then just tweak the same code as before
-
+tidy_dfm_trans <- toks_news %>%
+  tokens_lookup(dictionary = trans_dict) %>%   # 1. 查找词典
+  dfm() %>%                                    # 2. 生成 DFM 对象
+  dfm_group(groups = newspaper) %>%            # 3. 分组 (这步必须在 convert 之前！)
+  convert(to = "data.frame") %>%               # 4. 最后才转成 data.frame
+  rename("newspaper" = doc_id)
 
 # plot by newspaper
-tidy_dfm_trans %>%
-  ggplot() + # when we enter ggplot environment we need to use '+' not '%>%', 
-  geom_point(aes(x=reorder(newspaper, -sentiment), y=sentiment)) + # reordering newspaper variable so it is displayed from most negative to most positive
-  coord_flip() + # pivot plot by 90 degrees
-  xlab("Newspapers") + # label x axis
-  ylab("Overall tweet sentiment (negative to positive)") + # label y axis
-  theme_minimal() # pretty graphic theme
+library(tidyr)
+library(ggplot2)
+
+# 1. 先把数据从“宽表”转成“长表”
+tidy_plot_data <- tidy_dfm_trans %>%
+  pivot_longer(cols = c(trans, terf), names_to = "category", values_to = "count")
+ggplot(tidy_plot_data, aes(x = reorder(newspaper, count), y = count, fill = category)) + 
+  geom_col() +            # 使用柱状图 (geom_col) 比散点图 (geom_point) 更适合展示词频
+  coord_flip() +          # 横向翻转
+  xlab("Newspapers") + 
+  ylab("Frequency of usage") + 
+  theme_minimal()
 ```
 
 
@@ -516,34 +527,11 @@ tidy_tweets %>%
   ggplot(aes(date, pctmwords)) +
   geom_point(alpha=0.5) +
   geom_smooth(method= loess, alpha=0.25) +
-  xlab("Date") + ylab("% mortality words")
+  xlab("Date") + ylab("% trans-related terms")
 
 
 ```
 
 3. Apply the Lexicoder Sentiment Dictionary to the news tweets, but break down the analysis by newspaper
 4. Don't forget to 'knit' to produce your final html output for the exercise.
-
-
-```{r}
-dfm_newspaper_lsd <- toks_news_lsd %>% 
-  dfm()%>%
-  dfm_group(groups = username)
-
-tidy_newspaper_lsd <- dfm_newspaper_lsd %>%
-  convert(to = "data.frame") %>%
-  rename("newspaper" = doc_id) %>%
-  mutate(overall_sentiment = positive - negative)
-
-ggplot(tidy_newspaper_lsd, aes(x = reorder(newspaper, overall_sentiment), y = overall_sentiment)) + 
-  geom_col(fill = "steelblue") + 
-  coord_flip() + 
-  labs(
-    title = "Overall Sentiment by Newspaper (LSD Dictionary)", 
-    x = "Newspaper", 
-    y = "Net Sentiment (Positive - Negative)"
-  ) +
-  theme_minimal()
-                               
-```
 
